@@ -99,6 +99,8 @@
     <div class="foot"><a class="link" id="resetLink" href="#">This is not my phone</a></div>
   </div>
 
+  <div class="foot" id="diag"></div>
+
 </div>
 
 <script>
@@ -106,6 +108,7 @@
 
   var DEVICE_KEY = 'qrclock_device_id';
   var state = { deviceId: '', name: '', nextAction: 'IN', busy: false };
+  var diag = { local: 'no', cookie: 'no', source: 'new' };
 
   function el(id) { return document.getElementById(id); }
 
@@ -127,22 +130,77 @@
     return 'd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 12);
   }
 
-  function getDeviceId() {
-    var id = '';
+  function readLocal() {
     try {
-      id = window.localStorage.getItem(DEVICE_KEY) || '';
-      if (!id) {
-        id = makeId();
-        window.localStorage.setItem(DEVICE_KEY, id);
-      }
+      var v = window.localStorage.getItem(DEVICE_KEY);
+      diag.local = 'yes';
+      return v || '';
     } catch (e) {
-      id = makeId();
+      diag.local = 'blocked';
+      return '';
     }
+  }
+
+  function writeLocal(v) {
+    try {
+      window.localStorage.setItem(DEVICE_KEY, v);
+      if (window.localStorage.getItem(DEVICE_KEY) !== v) { diag.local = 'blocked'; }
+    } catch (e) {
+      diag.local = 'blocked';
+    }
+  }
+
+  function readCookie() {
+    try {
+      var parts = ('; ' + document.cookie).split('; ' + DEVICE_KEY + '=');
+      if (parts.length === 2) {
+        diag.cookie = 'yes';
+        return decodeURIComponent(parts.pop().split(';').shift());
+      }
+      return '';
+    } catch (e) {
+      diag.cookie = 'blocked';
+      return '';
+    }
+  }
+
+  function writeCookie(v) {
+    try {
+      document.cookie = DEVICE_KEY + '=' + encodeURIComponent(v) +
+        '; max-age=63072000; path=/; SameSite=Lax; Secure';
+      if (readCookie() === v) { diag.cookie = 'yes'; } else { diag.cookie = 'blocked'; }
+    } catch (e) {
+      diag.cookie = 'blocked';
+    }
+  }
+
+  function getDeviceId() {
+    var fromLocal = readLocal();
+    var fromCookie = readCookie();
+    var id = fromLocal || fromCookie;
+
+    if (id) {
+      diag.source = fromLocal ? 'remembered by storage' : 'remembered by cookie';
+    } else {
+      id = makeId();
+      diag.source = 'new';
+    }
+
+    writeLocal(id);
+    writeCookie(id);
     return id;
   }
 
   function clearDeviceId() {
     try { window.localStorage.removeItem(DEVICE_KEY); } catch (e) {}
+    try { document.cookie = DEVICE_KEY + '=; max-age=0; path=/; SameSite=Lax; Secure'; } catch (e) {}
+  }
+
+  function drawDiag() {
+    var tail = state.deviceId ? state.deviceId.slice(-6) : '------';
+    el('diag').textContent =
+      'id ' + tail + '  ·  ' + diag.source +
+      '  ·  storage ' + diag.local + '  ·  cookie ' + diag.cookie;
   }
 
   function call(params, onDone, onFail) {
@@ -160,6 +218,7 @@
 
   function start() {
     state.deviceId = getDeviceId();
+    drawDiag();
     show('loading');
     call({ action: 'state', deviceId: state.deviceId }, onState, function () {
       show('register');

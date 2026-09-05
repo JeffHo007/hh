@@ -38,7 +38,7 @@
     width: 100%;
     font-size: 20px;
     font-weight: 700;
-    padding: 20px 12px;
+    padding: 22px 12px;
     margin-top: 20px;
     border: 0;
     border-radius: 12px;
@@ -57,10 +57,10 @@
   }
   .msg {
     margin-top: 16px;
-    padding: 12px 14px;
+    padding: 14px 16px;
     border-radius: 10px;
-    font-size: 15px;
-    line-height: 1.4;
+    font-size: 16px;
+    line-height: 1.45;
   }
   .msg.error { background: #fce8e6; color: #a50e0e; }
   .msg.ok { background: #e6f4ea; color: #137333; }
@@ -92,14 +92,17 @@
 
   <div id="main" class="hidden">
     <p class="big" id="greeting"></p>
-    <p class="sub">Tap the button when you arrive or leave.</p>
+    <p class="sub" id="mainSub"></p>
     <button id="punchBtn"></button>
-    <a class="link" id="switchLink" href="#"></a>
     <div id="mainMsg"></div>
     <div class="foot"><a class="link" id="resetLink" href="#">This is not my phone</a></div>
   </div>
 
-  <div class="foot" id="diag"></div>
+  <div id="finished" class="hidden">
+    <p class="big" id="finishedTitle"></p>
+    <div id="finishedMsg"></div>
+    <p class="sub" style="margin-top:22px">Scan the code on the wall again next time.</p>
+  </div>
 
 </div>
 
@@ -107,13 +110,12 @@
   var API_URL = 'https://script.google.com/macros/s/AKfycbz8VkBmFlaBVj7lyfpDUuaQVZayefHnYp7SZRkiAyou40qdq5Gb10AC_pfbxzxdsZusEA/exec';
 
   var DEVICE_KEY = 'qrclock_device_id';
-  var state = { deviceId: '', name: '', nextAction: 'IN', busy: false };
-  var diag = { local: 'no', cookie: 'no', source: 'new' };
+  var state = { deviceId: '', name: '', action: '', busy: false };
 
   function el(id) { return document.getElementById(id); }
 
   function show(id) {
-    ['loading', 'register', 'main'].forEach(function (s) {
+    ['loading', 'register', 'main', 'finished'].forEach(function (s) {
       el(s).classList.add('hidden');
     });
     el(id).classList.remove('hidden');
@@ -121,6 +123,13 @@
 
   function say(target, text, kind) {
     el(target).innerHTML = text ? '<div class="msg ' + kind + '">' + text + '</div>' : '';
+  }
+
+  function wantedAction() {
+    var q = String(window.location.search || '').toLowerCase();
+    if (q.indexOf('a=out') !== -1) { return 'OUT'; }
+    if (q.indexOf('a=in') !== -1) { return 'IN'; }
+    return '';
   }
 
   function makeId() {
@@ -131,61 +140,32 @@
   }
 
   function readLocal() {
-    try {
-      var v = window.localStorage.getItem(DEVICE_KEY);
-      diag.local = 'yes';
-      return v || '';
-    } catch (e) {
-      diag.local = 'blocked';
-      return '';
-    }
+    try { return window.localStorage.getItem(DEVICE_KEY) || ''; } catch (e) { return ''; }
   }
 
   function writeLocal(v) {
-    try {
-      window.localStorage.setItem(DEVICE_KEY, v);
-      if (window.localStorage.getItem(DEVICE_KEY) !== v) { diag.local = 'blocked'; }
-    } catch (e) {
-      diag.local = 'blocked';
-    }
+    try { window.localStorage.setItem(DEVICE_KEY, v); } catch (e) {}
   }
 
   function readCookie() {
     try {
       var parts = ('; ' + document.cookie).split('; ' + DEVICE_KEY + '=');
       if (parts.length === 2) {
-        diag.cookie = 'yes';
         return decodeURIComponent(parts.pop().split(';').shift());
       }
       return '';
-    } catch (e) {
-      diag.cookie = 'blocked';
-      return '';
-    }
+    } catch (e) { return ''; }
   }
 
   function writeCookie(v) {
     try {
       document.cookie = DEVICE_KEY + '=' + encodeURIComponent(v) +
         '; max-age=63072000; path=/; SameSite=Lax; Secure';
-      if (readCookie() === v) { diag.cookie = 'yes'; } else { diag.cookie = 'blocked'; }
-    } catch (e) {
-      diag.cookie = 'blocked';
-    }
+    } catch (e) {}
   }
 
   function getDeviceId() {
-    var fromLocal = readLocal();
-    var fromCookie = readCookie();
-    var id = fromLocal || fromCookie;
-
-    if (id) {
-      diag.source = fromLocal ? 'remembered by storage' : 'remembered by cookie';
-    } else {
-      id = makeId();
-      diag.source = 'new';
-    }
-
+    var id = readLocal() || readCookie() || makeId();
     writeLocal(id);
     writeCookie(id);
     return id;
@@ -194,13 +174,6 @@
   function clearDeviceId() {
     try { window.localStorage.removeItem(DEVICE_KEY); } catch (e) {}
     try { document.cookie = DEVICE_KEY + '=; max-age=0; path=/; SameSite=Lax; Secure'; } catch (e) {}
-  }
-
-  function drawDiag() {
-    var tail = state.deviceId ? state.deviceId.slice(-6) : '------';
-    el('diag').textContent =
-      'id ' + tail + '  ·  ' + diag.source +
-      '  ·  storage ' + diag.local + '  ·  cookie ' + diag.cookie;
   }
 
   function call(params, onDone, onFail) {
@@ -218,7 +191,6 @@
 
   function start() {
     state.deviceId = getDeviceId();
-    drawDiag();
     show('loading');
     call({ action: 'state', deviceId: state.deviceId }, onState, function () {
       show('register');
@@ -229,7 +201,7 @@
   function onState(res) {
     if (res && res.registered) {
       state.name = res.name;
-      state.nextAction = res.nextAction || 'IN';
+      state.action = wantedAction() || res.nextAction || 'IN';
       drawMain();
       show('main');
       return;
@@ -259,13 +231,13 @@
 
   function drawMain() {
     el('greeting').textContent = 'Hi ' + state.name;
+    el('mainSub').textContent = state.action === 'OUT'
+      ? 'Tap below to finish your shift.'
+      : 'Tap below to start your shift.';
     var btn = el('punchBtn');
-    btn.textContent = state.nextAction === 'OUT' ? 'Clock Out' : 'Clock In';
-    btn.className = state.nextAction === 'OUT' ? 'out' : '';
+    btn.textContent = state.action === 'OUT' ? 'Clock Out' : 'Clock In';
+    btn.className = state.action === 'OUT' ? 'out' : '';
     btn.disabled = false;
-    el('switchLink').textContent = state.nextAction === 'OUT'
-      ? 'I need to clock in instead'
-      : 'I need to clock out instead';
   }
 
   el('registerBtn').addEventListener('click', function () {
@@ -288,7 +260,7 @@
           return;
         }
         state.name = res.name;
-        state.nextAction = res.nextAction || 'IN';
+        state.action = wantedAction() || res.nextAction || 'IN';
         say('registerMsg', '', 'info');
         el('pinInput').value = '';
         drawMain();
@@ -300,13 +272,6 @@
         el('registerBtn').disabled = false;
         say('registerMsg', 'Could not reach the server. Try again.', 'error');
       });
-  });
-
-  el('switchLink').addEventListener('click', function (e) {
-    e.preventDefault();
-    state.nextAction = state.nextAction === 'OUT' ? 'IN' : 'OUT';
-    drawMain();
-    say('mainMsg', '', 'info');
   });
 
   el('resetLink').addEventListener('click', function (e) {
@@ -346,7 +311,7 @@
     call({
       action: 'punch',
       deviceId: state.deviceId,
-      punch: state.nextAction,
+      punch: state.action,
       lat: lat,
       lng: lng,
       acc: acc,
@@ -354,16 +319,16 @@
     },
     function (res) {
       state.busy = false;
-      el('punchBtn').disabled = false;
       if (!res || !res.ok) {
+        el('punchBtn').disabled = false;
         say('mainMsg', (res && res.message) || 'Something went wrong.', 'error');
         return;
       }
-      state.nextAction = res.nextAction;
-      drawMain();
       var word = res.action === 'OUT' ? 'Clocked out' : 'Clocked in';
       var extra = res.status && res.status !== 'OK' ? ' (' + res.status.toLowerCase() + ')' : '';
-      say('mainMsg', word + ' at ' + res.time + extra + '. You can close this page.', 'ok');
+      el('finishedTitle').textContent = word + ' at ' + res.time;
+      say('finishedMsg', 'Thanks ' + res.name + '. Your time has been recorded' + extra + '.', 'ok');
+      show('finished');
     },
     function () {
       state.busy = false;

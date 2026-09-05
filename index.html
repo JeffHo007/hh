@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clock In</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    padding: 24px 20px 40px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    background: #f4f5f7;
+    color: #202124;
+    min-height: 100vh;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { font-size: 15px; color: #5f6368; margin: 0 0 24px; }
+  .card {
+    background: #fff;
+    border-radius: 14px;
+    padding: 22px 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.12);
+    max-width: 460px;
+    margin: 0 auto;
+  }
+  label { display: block; font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
+  select, input {
+    width: 100%;
+    font-size: 18px;
+    padding: 14px 12px;
+    border: 1px solid #c4c7c5;
+    border-radius: 10px;
+    background: #fff;
+    color: #202124;
+  }
+  button {
+    width: 100%;
+    font-size: 20px;
+    font-weight: 700;
+    padding: 20px 12px;
+    margin-top: 20px;
+    border: 0;
+    border-radius: 12px;
+    background: #1a73e8;
+    color: #fff;
+  }
+  button:disabled { background: #9aa0a6; }
+  button.out { background: #d93025; }
+  .link {
+    display: block;
+    text-align: center;
+    margin-top: 18px;
+    font-size: 15px;
+    color: #1a73e8;
+    text-decoration: underline;
+  }
+  .msg {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  .msg.error { background: #fce8e6; color: #a50e0e; }
+  .msg.ok { background: #e6f4ea; color: #137333; }
+  .msg.info { background: #e8f0fe; color: #174ea6; }
+  .big { font-size: 26px; font-weight: 700; margin: 0 0 4px; }
+  .hidden { display: none; }
+  .foot { text-align: center; font-size: 13px; color: #80868b; margin-top: 22px; }
+</style>
+</head>
+<body>
+
+<div class="card">
+
+  <div id="loading">
+    <p class="big">Just a moment</p>
+    <p class="sub">Checking this phone.</p>
+  </div>
+
+  <div id="register" class="hidden">
+    <h1>Set up this phone</h1>
+    <p class="sub">You only do this once. After today the app will know you.</p>
+    <label for="nameSelect">Your name</label>
+    <select id="nameSelect"></select>
+    <label for="pinInput">Your PIN</label>
+    <input id="pinInput" type="tel" inputmode="numeric" maxlength="8" placeholder="4 digits">
+    <button id="registerBtn">Set up this phone</button>
+    <div id="registerMsg"></div>
+  </div>
+
+  <div id="main" class="hidden">
+    <p class="big" id="greeting"></p>
+    <p class="sub">Tap the button when you arrive or leave.</p>
+    <button id="punchBtn"></button>
+    <a class="link" id="switchLink" href="#"></a>
+    <div id="mainMsg"></div>
+    <div class="foot"><a class="link" id="resetLink" href="#">This is not my phone</a></div>
+  </div>
+
+</div>
+
+<script>
+  var API_URL = 'https://script.google.com/macros/s/AKfycbz8VkBmFlaBVj7lyfpDUuaQVZayefHnYp7SZRkiAyou40qdq5Gb10AC_pfbxzxdsZusEA/exec';
+
+  var DEVICE_KEY = 'qrclock_device_id';
+  var state = { deviceId: '', name: '', nextAction: 'IN', busy: false };
+
+  function el(id) { return document.getElementById(id); }
+
+  function show(id) {
+    ['loading', 'register', 'main'].forEach(function (s) {
+      el(s).classList.add('hidden');
+    });
+    el(id).classList.remove('hidden');
+  }
+
+  function say(target, text, kind) {
+    el(target).innerHTML = text ? '<div class="msg ' + kind + '">' + text + '</div>' : '';
+  }
+
+  function makeId() {
+    try {
+      if (window.crypto && crypto.randomUUID) { return crypto.randomUUID(); }
+    } catch (e) {}
+    return 'd-' + Date.now() + '-' + Math.random().toString(36).slice(2, 12);
+  }
+
+  function getDeviceId() {
+    var id = '';
+    try {
+      id = window.localStorage.getItem(DEVICE_KEY) || '';
+      if (!id) {
+        id = makeId();
+        window.localStorage.setItem(DEVICE_KEY, id);
+      }
+    } catch (e) {
+      id = makeId();
+    }
+    return id;
+  }
+
+  function clearDeviceId() {
+    try { window.localStorage.removeItem(DEVICE_KEY); } catch (e) {}
+  }
+
+  function call(params, onDone, onFail) {
+    var query = Object.keys(params).map(function (k) {
+      var v = params[k];
+      if (v === null || v === undefined) { v = ''; }
+      return encodeURIComponent(k) + '=' + encodeURIComponent(v);
+    }).join('&');
+
+    fetch(API_URL + '?' + query, { method: 'GET', redirect: 'follow' })
+      .then(function (r) { return r.json(); })
+      .then(onDone)
+      .catch(function () { onFail(); });
+  }
+
+  function start() {
+    state.deviceId = getDeviceId();
+    show('loading');
+    call({ action: 'state', deviceId: state.deviceId }, onState, function () {
+      show('register');
+      say('registerMsg', 'Could not reach the server. Check your signal and reload the page.', 'error');
+    });
+  }
+
+  function onState(res) {
+    if (res && res.registered) {
+      state.name = res.name;
+      state.nextAction = res.nextAction || 'IN';
+      drawMain();
+      show('main');
+      return;
+    }
+
+    var select = el('nameSelect');
+    select.innerHTML = '';
+    var names = (res && res.staff) || [];
+    if (!names.length) {
+      show('register');
+      say('registerMsg', 'No staff have been added to the sheet yet.', 'error');
+      return;
+    }
+    var blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = 'Choose your name';
+    select.appendChild(blank);
+    names.forEach(function (n) {
+      var o = document.createElement('option');
+      o.value = n;
+      o.textContent = n;
+      select.appendChild(o);
+    });
+    show('register');
+    say('registerMsg', (res && res.message) || '', 'info');
+  }
+
+  function drawMain() {
+    el('greeting').textContent = 'Hi ' + state.name;
+    var btn = el('punchBtn');
+    btn.textContent = state.nextAction === 'OUT' ? 'Clock Out' : 'Clock In';
+    btn.className = state.nextAction === 'OUT' ? 'out' : '';
+    btn.disabled = false;
+    el('switchLink').textContent = state.nextAction === 'OUT'
+      ? 'I need to clock in instead'
+      : 'I need to clock out instead';
+  }
+
+  el('registerBtn').addEventListener('click', function () {
+    if (state.busy) { return; }
+    var name = el('nameSelect').value;
+    var pin = el('pinInput').value;
+    if (!name) { say('registerMsg', 'Please choose your name.', 'error'); return; }
+    if (!pin) { say('registerMsg', 'Please enter your PIN.', 'error'); return; }
+
+    state.busy = true;
+    el('registerBtn').disabled = true;
+    say('registerMsg', 'Setting up.', 'info');
+
+    call({ action: 'register', deviceId: state.deviceId, name: name, pin: pin },
+      function (res) {
+        state.busy = false;
+        el('registerBtn').disabled = false;
+        if (!res || !res.ok) {
+          say('registerMsg', (res && res.message) || 'Something went wrong.', 'error');
+          return;
+        }
+        state.name = res.name;
+        state.nextAction = res.nextAction || 'IN';
+        say('registerMsg', '', 'info');
+        el('pinInput').value = '';
+        drawMain();
+        show('main');
+        say('mainMsg', 'This phone is now set up for you.', 'ok');
+      },
+      function () {
+        state.busy = false;
+        el('registerBtn').disabled = false;
+        say('registerMsg', 'Could not reach the server. Try again.', 'error');
+      });
+  });
+
+  el('switchLink').addEventListener('click', function (e) {
+    e.preventDefault();
+    state.nextAction = state.nextAction === 'OUT' ? 'IN' : 'OUT';
+    drawMain();
+    say('mainMsg', '', 'info');
+  });
+
+  el('resetLink').addEventListener('click', function (e) {
+    e.preventDefault();
+    clearDeviceId();
+    state.name = '';
+    start();
+  });
+
+  el('punchBtn').addEventListener('click', function () {
+    if (state.busy) { return; }
+    state.busy = true;
+    el('punchBtn').disabled = true;
+    say('mainMsg', 'Finding your location.', 'info');
+
+    if (!navigator.geolocation) {
+      sendPunch(null, null, null, 'This phone does not support location.');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        sendPunch(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy, '');
+      },
+      function (err) {
+        var note = 'Location was not available.';
+        if (err && err.code === 1) { note = 'Location permission was refused.'; }
+        if (err && err.code === 3) { note = 'Location took too long.'; }
+        sendPunch(null, null, null, note);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  });
+
+  function sendPunch(lat, lng, acc, locationError) {
+    say('mainMsg', 'Recording.', 'info');
+    call({
+      action: 'punch',
+      deviceId: state.deviceId,
+      punch: state.nextAction,
+      lat: lat,
+      lng: lng,
+      acc: acc,
+      locErr: locationError
+    },
+    function (res) {
+      state.busy = false;
+      el('punchBtn').disabled = false;
+      if (!res || !res.ok) {
+        say('mainMsg', (res && res.message) || 'Something went wrong.', 'error');
+        return;
+      }
+      state.nextAction = res.nextAction;
+      drawMain();
+      var word = res.action === 'OUT' ? 'Clocked out' : 'Clocked in';
+      var extra = res.status && res.status !== 'OK' ? ' (' + res.status.toLowerCase() + ')' : '';
+      say('mainMsg', word + ' at ' + res.time + extra + '. You can close this page.', 'ok');
+    },
+    function () {
+      state.busy = false;
+      el('punchBtn').disabled = false;
+      say('mainMsg', 'Could not reach the server. Try again.', 'error');
+    });
+  }
+
+  start();
+</script>
+
+</body>
+</html>
